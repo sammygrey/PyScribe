@@ -1,0 +1,6 @@
+#! Python 3.14
+ctranslate2
+transformers
+SpeechRecognition
+numpy
+#ffmpeg, cuBLAS for CUDA 12.4, cuDNN for CUDA 12.4
