@@ -1,4 +1,4 @@
-#adapted from https://github.com/jiaaro/pydub/blob/master/pydub/pyaudioop.py
+#lifted from https://github.com/jiaaro/pydub/blob/master/pydub/pyaudioop.py
 #replacement for audioop
 
 import math
@@ -22,7 +22,7 @@ def _check_params(length, size):
 
 
 def _sample_count(cp, size):
-    return len(cp) / size
+    return len(cp) // size
 
 
 def _get_samples(cp, size, signed=True):

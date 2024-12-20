@@ -1,7 +1,10 @@
 import os
 import numpy as np
-import speech_recognition as sr
+#import speech_recognition as sr
+import utils.audio.live_audio as sr
 
+#from utils.audio import Microphone, AudioData
+from huggingface_hub import  snapshot_download
 from transformers import WhisperProcessor, AutoProcessor
 from ctranslate2 import StorageView, models, converters
 from datetime import datetime, timedelta, timezone
@@ -38,20 +41,21 @@ def main():
     else:
         source = sr.Microphone(sample_rate=16000)
         
-    model_id = "openai/whisper-large-v3-turbo"
+    model_name = "openai/whisper-large-v3-turbo"
+    model_path = snapshot_download(model_name)
 
-    processor =  WhisperProcessor.from_pretrained(model_id) #AutoProcessor.from_pretrained(mode_id) if you have modified the model
+    processor =  WhisperProcessor.from_pretrained(model_name) #AutoProcessor.from_pretrained(mode_id) if you have modified the model
     tokenizer = processor.tokenizer
     
     try: 
-        converter = converters.TransformersConverter(model_id)
+        converter = converters.TransformersConverter(model_name)
         #if you have stronger hardware feel free to forgo the quantization, this reduces memory usage for large models on lesser hardware
-        converter.convert(output_dir="whisper-turbo-ct2", quantization="int8_float16")
+        converter.convert(output_dir="whisper-turbo-ct2", quantization="int8_float16", force=True)
     except:
-        print("Model has already been converted to CTranslate2 format; conversion not necessary.")
+       print("Model has already been converted to CTranslate2 format; conversion not necessary.")
 
-    
-    audio_model = models.Whisper("whisper-turbo-ct2", device="cuda")
+    converted_model = "whisper-turbo-ct2"
+    audio_model = models.Whisper(converted_model, device="cuda")
     
     print("Model Loaded.\n")
     
