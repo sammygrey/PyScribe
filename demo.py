@@ -1,16 +1,14 @@
 import os
 import numpy as np
-#import speech_recognition as sr
-import utils.audio.live_audio as sr
+import speech_recognition as sr
 
-#from utils.audio import Microphone, AudioData
-from huggingface_hub import  snapshot_download
 from transformers import WhisperProcessor, AutoProcessor
 from ctranslate2 import StorageView, models, converters
 from datetime import datetime, timedelta, timezone
 from queue import Queue
 from time import sleep
 from sys import platform
+from silero_vad import load_silero_vad, get_speech_timestamps
 
 def main():
 
@@ -42,17 +40,16 @@ def main():
         source = sr.Microphone(sample_rate=16000)
         
     model_name = "openai/whisper-large-v3-turbo"
-    model_path = snapshot_download(model_name)
 
     processor =  WhisperProcessor.from_pretrained(model_name) #AutoProcessor.from_pretrained(mode_id) if you have modified the model
     tokenizer = processor.tokenizer
     
-    try: 
-        converter = converters.TransformersConverter(model_name)
+    #try: 
+        #converter = converters.TransformersConverter(model_name)
         #if you have stronger hardware feel free to forgo the quantization, this reduces memory usage for large models on lesser hardware
-        converter.convert(output_dir="whisper-turbo-ct2", quantization="int8_float16", force=True)
-    except:
-       print("Model has already been converted to CTranslate2 format; conversion not necessary.")
+        #converter.convert(output_dir="whisper-turbo-ct2", quantization="int8_float16", force=True)
+    #except:
+       #print("Model has already been converted to CTranslate2 format; conversion not necessary.")
 
     converted_model = "whisper-turbo-ct2"
     audio_model = models.Whisper(converted_model, device="cuda")
@@ -66,6 +63,7 @@ def main():
     logits = []
 
     with source:
+        #recorder.use_silero()
         recorder.adjust_for_ambient_noise(source)
 
 
@@ -126,21 +124,24 @@ def main():
                 inputs = processor(audio_np, return_tensors="np", sampling_rate=16000)
                 features = StorageView.from_array(inputs["input_features"])
                 prompt = make_prompt(tokenizer)
-                results = audio_model.generate(features, [prompt], return_logits_vocab=True) #include_prompt_in_result useful for debugging
+                results = audio_model.generate(features, [prompt], return_scores=True) #include_prompt_in_result useful for debugging
                 text = processor.decode(results[0].sequences_ids[0])
-                #logit = results[0].logits
+                logit = results[0].scores
 
                 # If we detected a pause between recordings, add a new item to our transcription.
                 # Otherwise edit the existing one.
                 if phrase_complete:
                     transcription.append(text)
                     #add logits score to log
-                    #logits.add(logit)
+                    logits.append(logit)
                     
                 else:
                     transcription[-1] = transcription[-1] + text
                     #math to combine logits scores of what are treated as seperate probabilities by the model
-                    #logits[-1] = logits[-1] + logit
+                    if len(logits) > 0:
+                        logits[-1] = logits[-1] + logit
+                    else:
+                        logits.append(logit)
                     
                     
                 # Clear the console to reprint the updated transcription.
@@ -159,6 +160,8 @@ def main():
     print("\n\nTranscription:")
     for line in transcription:
         print(line)
+    for logit in logits:
+        print(logit)
 
 
 if __name__ == "__main__":

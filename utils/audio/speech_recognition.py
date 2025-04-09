@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
 
-#Adapted from https://github.com/Uberi/speech_recognition/
-
 """Library for performing speech recognition, with support for several engines and APIs, online and offline."""
 
-import os, math, collections
-import threading
-import threading
-import warnings
+from __future__ import annotations
 
-from.audio_operations import add, rms
-from .audio import AudioData
+import collections
+import io
+import math
+import os
+import sys
+import threading
+import time
+import numpy as np
+from .audio_operations import rms, add
+
+from speech_recognition.audio import AudioData
 
 __author__ = "Anthony Zhang (Uberi)"
-__version__ = "3.11.0"
+__version__ = "3.13.0"
 __license__ = "BSD"
 
 
@@ -40,6 +44,9 @@ class Microphone(AudioSource):
 
     The microphone audio is recorded in chunks of ``chunk_size`` samples, at a rate of ``sample_rate`` samples per second (Hertz). If not specified, the value of ``sample_rate`` is determined automatically from the system's microphone settings.
 
+    Higher ``sample_rate`` values result in better audio quality, but also more bandwidth (and therefore, slower recognition). Additionally, some CPUs, such as those in older Raspberry Pi models, can't keep up if this value is too high.
+
+    Higher ``chunk_size`` values help avoid triggering on rapidly changing ambient noise, but also makes detection less sensitive. This value, generally, should be left at its default.
     """
     def __init__(self, device_index=None, sample_rate=None, chunk_size=1024):
         assert device_index is None or isinstance(device_index, int), "Device index must be None or an integer"
@@ -184,10 +191,10 @@ class Recognizer(AudioSource):
         self.dynamic_energy_ratio = 1.5
         self.pause_threshold = 0.8  # seconds of non-speaking audio before a phrase is considered complete
         self.operation_timeout = None  # seconds after an internal operation (e.g., an API request) starts before it times out, or ``None`` for no timeout
+        self.VAD = None
 
         self.phrase_threshold = 0.3  # minimum seconds of speaking audio before we consider the speaking audio a phrase - values below this are ignored (for filtering out clicks and pops)
         self.non_speaking_duration = 0.5  # seconds of non-speaking audio to keep on both sides of the recording
-
 
     def adjust_for_ambient_noise(self, source, duration=1):
         """
@@ -215,8 +222,7 @@ class Recognizer(AudioSource):
             damping = self.dynamic_energy_adjustment_damping ** seconds_per_buffer  # account for different chunk sizes and rates
             target_energy = energy * self.dynamic_energy_ratio
             self.energy_threshold = self.energy_threshold * damping + target_energy * (1 - damping)
-    
-    
+
     def listen(self, source, timeout=None, phrase_time_limit=None, snowboy_configuration=None, stream=False):
         """
         Records a single phrase from ``source`` (an ``AudioSource`` instance) into an ``AudioData`` instance, which it returns.
@@ -265,8 +271,7 @@ class Recognizer(AudioSource):
                     # handle waiting too long for phrase by raising an exception
                     elapsed_time += seconds_per_buffer
                     if timeout and elapsed_time > timeout:
-                        pass
-                        #raise WaitTimeoutError("listening timed out while waiting for phrase to start")
+                        raise TimeoutError("listening timed out while waiting for phrase to start")
 
                     buffer = source.stream.read(source.CHUNK)
                     if len(buffer) == 0: break  # reached end of the stream
@@ -345,8 +350,7 @@ class Recognizer(AudioSource):
             frame_data = b"".join(frames)
             # yield the entire phrase as a single AudioData instance
             yield AudioData(frame_data, source.SAMPLE_RATE, source.SAMPLE_WIDTH)
-       
-            
+
     def listen_in_background(self, source, callback, phrase_time_limit=None):
         """
         Spawns a thread to repeatedly record phrases from ``source`` (an ``AudioSource`` instance) into an ``AudioData`` instance and call ``callback`` with that ``AudioData`` instance as soon as each phrase are detected.
@@ -365,8 +369,8 @@ class Recognizer(AudioSource):
                 while running[0]:
                     try:  # listen for 1 second, then check again if the stop function has been called
                         audio = self.listen(s, 1, phrase_time_limit)
-                    except TimeoutError:  # listening timed out, just try again
-                        warnings.warn("Threaded listen timed out, restarting.")
+                    except  TimeoutError:  # listening timed out, just try again
+                        pass
                     else:
                         if running[0]: callback(self, audio)
 
@@ -379,26 +383,3 @@ class Recognizer(AudioSource):
         listener_thread.daemon = True
         listener_thread.start()
         return stopper
-    
-    def recognize_silero(self, audio_data, return_timestamps=False):
-        
-        assert isinstance(audio_data, AudioData), "``audio_data`` must be audio data"
-        assert isinstance(return_timestamps, bool), "``audio_data`` must be bool"
-        
-        try:
-            from silero_vad import load_silero_vad, read_audio, get_speech_timestamps
-        except ImportError:
-            #raise RequestError("missing silero_vad module: ensure that silero_vad is set up correctly")
-            pass
-        except ValueError:
-            #raise RequestError("bad silero_vad installation; try reinstalling silero_vad version 5.1.2 or better")
-            pass
-        
-        
-        model = load_silero_vad() #we may want to preload this somewhere as a toggle
-        wav = read_audio()
-        speech_timestamps = get_speech_timestamps(model, wav, audio_data.sample_rate)
-        if not return_timestamps:
-            return speech_timestamps >= 1
-        else:
-            return speech_timestamps
